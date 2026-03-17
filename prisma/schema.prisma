@@ -1,0 +1,231 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Auth & Users ---
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String?
+  firstName    String?
+  lastName     String?
+  phone        String?
+  role         Role      @default(CUSTOMER)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  orders        Order[]
+  accounts      Account[]
+  sessions      Session[]
+  auditLogs     AuditLog[]     @relation("UserAuditLogs")
+  notifications Notification[] @relation("UserNotifications")
+}
+
+enum Role {
+  CUSTOMER
+  OPS
+  ATTORNEY
+  TITLE_PARTNER
+  ADMIN
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// --- Core Domain ---
+
+model DocumentType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String   @db.Text
+  useCaseHint String?  @db.Text
+  baseFee     Decimal  @db.Decimal(10, 2)
+  estRecFee   Decimal  @db.Decimal(10, 2) @default(35)
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  orders Order[]
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  userId          String
+  user            User        @relation(fields: [userId], references: [id])
+  status          OrderStatus @default(SUBMITTED)
+
+  scenarioType    String?
+  documentTypeId  String?
+  documentType    DocumentType? @relation(fields: [documentTypeId], references: [id])
+
+  contactFirstName String
+  contactLastName  String
+  contactEmail     String
+  contactPhone     String?
+  mailingAddress   String?
+  mailingCity      String?
+  mailingState     String?
+  mailingZip       String?
+
+  propertyState    String?
+  propertyCounty   String
+  propertyAddress  String
+  propertyCity     String
+  propertyZip      String
+  propertyType     String?
+  parcelFolio      String?
+
+  transferReason   String?
+  estimatedValue   Decimal?    @db.Decimal(12, 2)
+  hasFinancing     Boolean?
+  specialNotes     String?     @db.Text
+
+  screeningResult  String?
+  screeningData    Json?
+
+  serviceFee       Decimal?    @db.Decimal(10, 2)
+  recordingFee     Decimal?    @db.Decimal(10, 2)
+  totalAmount      Decimal?    @db.Decimal(10, 2)
+  stripeSessionId  String?
+  stripePaymentId  String?
+  paidAt           DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parties       OrderParty[]
+  documents     OrderDocument[]
+  payments      Payment[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+}
+
+enum OrderStatus {
+  DRAFT
+  SUBMITTED
+  PAYMENT_PENDING
+  PAID
+  INTAKE_REVIEW
+  AWAITING_DOCUMENTS
+  IN_PROGRESS
+  TITLE_SEARCH
+  ATTORNEY_REVIEW
+  NOTARIZATION
+  RECORDING
+  COMPLETED
+  CANCELLED
+}
+
+model OrderParty {
+  id         String     @id @default(cuid())
+  orderId    String
+  order      Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  role       PartyRole
+  name       String
+  entityType EntityType @default(INDIVIDUAL)
+  entityName String?
+  createdAt  DateTime   @default(now())
+}
+
+enum PartyRole {
+  GRANTOR
+  GRANTEE
+}
+
+enum EntityType {
+  INDIVIDUAL
+  TRUST
+  ENTITY
+}
+
+model OrderDocument {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fileName   String
+  fileType   String
+  fileSize   Int
+  filePath   String
+  category   String?
+  version    Int      @default(1)
+  uploadedAt DateTime @default(now())
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stripeSessionId String?  @unique
+  stripePaymentId String?
+  amount          Decimal  @db.Decimal(10, 2)
+  status          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// --- Audit & Notifications ---
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?    @relation("UserAuditLogs", fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  details   Json?    @default("{}")
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  orderId   String?
+  order     Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?     @relation("UserNotifications", fields: [userId], references: [id], onDelete: SetNull)
+  type      String
+  channel   String    @default("email")
+  subject   String?
+  body      String?   @db.Text
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+}
